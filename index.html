@@ -1,0 +1,549 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>PotholeNet Simulator</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: control strip → live road canvas → vehicle + feed pair → authority dashboard. Road-sign type, asphalt neutrals, marking-yellow accent. */
+:root{
+  --bg:#eceff2; --panel:#ffffff; --ink:#16202a; --muted:#5a6673; --line:#d3d9e0;
+  --marking:#e0a800; --alert:#d9481f; --signal:#0d8486; --cloud:#3366e0; --ok:#2a8f50;
+  --verge:#cfd8cf; --asphalt:#3a4048; --chip:#f2f4f6;
+  --f-display:"Barlow Condensed","Arial Narrow",sans-serif;
+  --f-body:"Inter",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"JetBrains Mono",ui-monospace,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0e1318; --panel:#161d25; --ink:#e7ecf1; --muted:#95a2af; --line:#29333e;
+  --marking:#f3c12a; --alert:#ff6a44; --signal:#2db6b8; --cloud:#6e95ff; --ok:#4cc27a;
+  --verge:#1f2a22; --asphalt:#30353c; --chip:#1d2630; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0e1318; --panel:#161d25; --ink:#e7ecf1; --muted:#95a2af; --line:#29333e;
+  --marking:#f3c12a; --alert:#ff6a44; --signal:#2db6b8; --cloud:#6e95ff; --ok:#4cc27a;
+  --verge:#1f2a22; --asphalt:#30353c; --chip:#1d2630; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:14px;line-height:1.5}
+.wrap{max-width:1200px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:20px 48px;display:flex;flex-direction:column;gap:18px}
+header{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px}
+.eyebrow{font-family:var(--f-mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+h1{font-family:var(--f-display);font-weight:700;font-size:clamp(34px,6vw,52px);line-height:.95;margin:4px 0 6px;letter-spacing:.01em;text-wrap:balance}
+h1 span{background:var(--marking);color:#16202a;padding:0 .18em}
+.lede{color:var(--muted);max-width:62ch;margin:0}
+h2{font-family:var(--f-display);font-weight:600;font-size:22px;letter-spacing:.02em;margin:0;text-transform:uppercase}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;min-width:0}
+.panel-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.hint{font-size:12px;color:var(--muted)}
+.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+button,select{font:inherit;font-size:13px;color:var(--ink);background:var(--chip);border:1px solid var(--line);border-radius:7px;padding:7px 12px;cursor:pointer}
+button:hover,select:hover{border-color:var(--muted)}
+button:focus-visible,select:focus-visible,input:focus-visible+span{outline:2px solid var(--cloud);outline-offset:2px}
+button.primary{background:var(--ink);color:var(--bg);border-color:var(--ink);font-weight:600}
+.toggle{display:inline-flex;align-items:center;gap:8px;font-size:13px;padding:6px 10px;border:1px solid var(--line);border-radius:7px;background:var(--chip);cursor:pointer;user-select:none}
+.toggle input{accent-color:var(--signal);width:16px;height:16px;margin:0}
+.road-scroll{overflow-x:auto;border-radius:8px}
+#road{display:block;cursor:crosshair}
+.legend{display:flex;flex-wrap:wrap;gap:14px;margin-top:10px;font-size:12px;color:var(--muted)}
+.legend i{display:inline-block;width:18px;height:3px;vertical-align:middle;margin-right:6px;border-radius:2px}
+.grid2{display:grid;grid-template-columns:1.1fr .9fr;gap:18px}
+@media (max-width:860px){.grid2{grid-template-columns:1fr}}
+.carchips{display:flex;flex-wrap:wrap;gap:6px}
+.carchip{display:inline-flex;align-items:center;gap:6px;padding:5px 10px}
+.carchip b{width:10px;height:10px;border-radius:3px;display:inline-block}
+.carchip[aria-pressed="true"]{border-color:var(--ink);font-weight:600}
+.readouts{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:12px 0}
+@media (max-width:520px){.readouts{grid-template-columns:repeat(2,1fr)}}
+.ro{border-top:2px solid var(--line);padding-top:6px}
+.ro .k{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+.ro .v{font-family:var(--f-mono);font-size:18px;font-variant-numeric:tabular-nums}
+.phone{background:var(--chip);border:1px solid var(--line);border-radius:12px;padding:10px 12px;display:flex;gap:10px;align-items:flex-start;min-height:58px}
+.phone svg{flex:none;margin-top:2px}
+.phone .ttl{font-size:11px;color:var(--muted);font-family:var(--f-mono)}
+.phone .msg{font-weight:500}
+#sensor{display:block;width:100%;height:130px;margin-top:12px}
+.feed{list-style:none;margin:0;padding:0;max-height:330px;overflow-y:auto;display:flex;flex-direction:column;gap:6px}
+.feed li{display:grid;grid-template-columns:54px 62px 1fr;gap:8px;font-size:12.5px;align-items:baseline;padding:6px 0;border-bottom:1px solid var(--line)}
+.feed .t{font-family:var(--f-mono);color:var(--muted);font-variant-numeric:tabular-nums}
+.tag{font-family:var(--f-mono);font-size:10.5px;letter-spacing:.06em;padding:1px 6px;border-radius:4px;text-align:center;color:#fff}
+.tag.V2V{background:var(--signal)}.tag.CLOUD{background:var(--cloud)}.tag.SENSOR{background:var(--alert)}.tag.CREW{background:var(--ok)}.tag.ROAD{background:var(--muted)}
+.kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:14px}
+@media (max-width:760px){.kpis{grid-template-columns:repeat(2,1fr)}}
+.kpi{padding:10px 12px;border:1px solid var(--line);border-radius:8px}
+.kpi .k{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+.kpi .v{font-family:var(--f-display);font-size:34px;font-weight:700;line-height:1.05;font-variant-numeric:tabular-nums}
+.kpi.bad .v{color:var(--alert)}.kpi.good .v{color:var(--ok)}
+.tbl-scroll{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13px;min-width:720px}
+th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600;padding:8px;border-bottom:1px solid var(--line)}
+td{padding:9px 8px;border-bottom:1px solid var(--line);vertical-align:middle}
+td.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+.sub{display:block;font-family:var(--f-mono);font-size:11px;color:var(--muted)}
+.pill{display:inline-block;font-size:11.5px;font-weight:600;padding:2px 8px;border-radius:999px;border:1px solid currentColor;white-space:nowrap}
+.pill.new{color:var(--muted)}.pill.reported{color:var(--alert)}.pill.verified{color:#fff;background:var(--alert);border-color:var(--alert)}
+.pill.dispatched{color:var(--cloud)}.pill.fixed{color:var(--ok)}
+.rec{font-family:var(--f-mono);font-size:11.5px;color:var(--alert);font-weight:500}
+.pri{font-weight:600}.pri.High{color:var(--alert)}.pri.Medium{color:var(--marking)}.pri.Low{color:var(--muted)}
+td button{padding:4px 10px;font-size:12px}
+.insight{margin-top:12px;padding:10px 12px;border-left:3px solid var(--marking);background:var(--chip);border-radius:0 8px 8px 0;font-size:13px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div class="wrap">
+  <header>
+    <div>
+      <div class="eyebrow">Design Thinking Expo · Smart Roads Prototype</div>
+      <h1><span>PotholeNet</span> live simulation</h1>
+      <p class="lede">Every car carries an under-body vibration sensor. When one hits a pothole, it warns the cars behind it over a V2V/cellular link and files a geotagged report to the road authority's dashboard.</p>
+    </div>
+    <div class="controls">
+      <button id="play" class="primary" type="button">Pause</button>
+      <select id="speed" aria-label="Simulation speed"><option value="1">1× speed</option><option value="2">2× speed</option><option value="4">4× speed</option></select>
+      <select id="ncars" aria-label="Number of cars"><option value="3">3 cars</option><option value="5" selected>5 cars</option><option value="7">7 cars</option></select>
+      <label class="toggle"><input type="checkbox" id="alerts" checked><span>Driver alerts</span></label>
+      <label class="toggle"><input type="checkbox" id="auto" checked><span>New potholes</span></label>
+      <button id="reset" type="button">Reset</button>
+    </div>
+  </header>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Demo Road A · 260 m loop</h2>
+      <span class="hint">Click the road to drop a pothole. Click a car to watch its sensor.</span>
+    </div>
+    <div class="road-scroll"><canvas id="road" aria-label="Road simulation with cars and potholes"></canvas></div>
+    <div class="legend">
+      <span><i style="background:var(--signal)"></i>Car-to-car alert</span>
+      <span><i style="background:var(--cloud)"></i>Report to cloud dashboard</span>
+      <span><i style="background:var(--alert)"></i>Pothole reported</span>
+      <span><i style="background:var(--ok)"></i>Repaired patch</span>
+    </div>
+  </section>
+
+  <div class="grid2">
+    <section class="panel">
+      <div class="panel-head"><h2>In-car unit</h2><div class="carchips" id="carchips"></div></div>
+      <div class="phone" id="phone">
+        <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2 21h20L12 3z" fill="var(--marking)"/><path d="M12 10v5M12 17.5v.5" stroke="#16202a" stroke-width="2" stroke-linecap="round"/></svg>
+        <div><div class="ttl" id="phoneTtl">PotholeNet · Car 1</div><div class="msg" id="phoneMsg">No alerts yet. Road ahead clear.</div></div>
+      </div>
+      <div class="readouts">
+        <div class="ro"><div class="k">Speed</div><div class="v" id="roSpeed">0 km/h</div></div>
+        <div class="ro"><div class="k">Lane</div><div class="v" id="roLane">Left</div></div>
+        <div class="ro"><div class="k">Known holes</div><div class="v" id="roKnown">0</div></div>
+        <div class="ro"><div class="k">Hits taken</div><div class="v" id="roHits">0</div></div>
+      </div>
+      <div class="hint">Vertical accelerometer (z-axis, g). A spike above the threshold counts as a pothole.</div>
+      <canvas id="sensor"></canvas>
+    </section>
+    <section class="panel">
+      <div class="panel-head"><h2>Network feed</h2><span class="hint">Messages between cars, cloud and crews</span></div>
+      <ul class="feed" id="feed"></ul>
+    </section>
+  </div>
+
+  <section class="panel">
+    <div class="panel-head"><h2>Authority dashboard</h2><span class="hint">Municipal road maintenance view</span></div>
+    <div class="kpis">
+      <div class="kpi"><div class="k">Active potholes</div><div class="v" id="kActive">0</div></div>
+      <div class="kpi"><div class="k">Sensor reports</div><div class="v" id="kReports">0</div></div>
+      <div class="kpi"><div class="k">Driver alerts sent</div><div class="v" id="kAlerts">0</div></div>
+      <div class="kpi bad"><div class="k">Hits taken</div><div class="v" id="kHits">0</div></div>
+      <div class="kpi good"><div class="k">Hits avoided</div><div class="v" id="kAvoid">0</div></div>
+    </div>
+    <div class="tbl-scroll">
+      <table>
+        <thead><tr><th>ID</th><th>Location</th><th>Depth</th><th>Reports</th><th>Recurrence</th><th>Priority</th><th>Status</th><th>Action</th></tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+    <div class="insight" id="insight">Turn off <b>Driver alerts</b> to compare: hits taken climb fast without the network.</div>
+  </section>
+</div>
+
+<script>
+(function(){
+const L = 260, THRESH = 0.55, V2V_RANGE = 110, CREW_TIME = 8;
+const CAR_COLORS = ['#e5532d','#3a6ff0','#2f9e58','#9b51e0','#e0a800','#0d8486','#d63384'];
+const BASE_LAT = 12.97161, BASE_LNG = 77.59456;
+const road = document.getElementById('road'), rctx = road.getContext('2d');
+const sensor = document.getElementById('sensor'), sctx = sensor.getContext('2d');
+let cars, potholes, effects, feed, stats, simTime, nextPid, spawnTimer;
+let running = true, simSpeed = 1, alertsOn = true, autoSpawn = true, selectedId = 1;
+let W = 800, H = 250, T = {}, dashDirty = true, feedDirty = true, frame = 0;
+const ROAD_TOP = 62, LANE_H = 56;
+const laneY = l => ROAD_TOP + LANE_H/2 + l*LANE_H;
+const laneName = l => l === 0 ? 'left' : 'right';
+const toPx = x => x / L * W;
+const fmtT = t => { const s = Math.floor(t); return String(Math.floor(s/60)).padStart(2,'0') + ':' + String(s%60).padStart(2,'0'); };
+
+function readTheme(){
+  const cs = getComputedStyle(document.documentElement), g = n => cs.getPropertyValue(n).trim();
+  T = {ink:g('--ink'),muted:g('--muted'),marking:g('--marking'),alert:g('--alert'),signal:g('--signal'),cloud:g('--cloud'),ok:g('--ok'),verge:g('--verge'),asphalt:g('--asphalt'),panel:g('--panel'),line:g('--line')};
+}
+
+function reset(){
+  const n = +document.getElementById('ncars').value;
+  cars = [];
+  for (let i = 0; i < n; i++){
+    const lane = i % 2;
+    cars.push({id:i+1, x:(L/n)*i + 4, prevX:0, lane, ly:lane, speed:12, base:11 + Math.random()*4,
+      color:CAR_COLORS[i], known:new Set(), bounce:0, trace:new Array(180).fill(0), spikeQ:[], hits:0,
+      hud:null});
+  }
+  potholes = []; effects = []; feed = []; simTime = 0; nextPid = 1; spawnTimer = 0;
+  stats = {reports:0, alerts:0, hits:0, avoided:0};
+  addPothole(78, 0, 9, true); addPothole(150, 1, 11, true); addPothole(214, 0, 7, true);
+  if (!cars.find(c => c.id === selectedId)) selectedId = 1;
+  log('ROAD', `Simulation started with ${n} sensor-equipped cars and 3 unreported potholes.`);
+  buildChips(); dashDirty = true;
+}
+
+function log(kind, text){ feed.unshift({t:simTime, kind, text}); if (feed.length > 60) feed.pop(); feedDirty = true; }
+
+function addPothole(x, lane, depth, silent){
+  const site = potholes.find(p => p.lane === lane && Math.abs(((p.x - x + L*1.5) % L) - L/2) < 8);
+  if (site){
+    if (site.active) return;
+    site.active = true; site.status = 'new'; site.depth = depth; site.reports = 0; site.recurrence++;
+    log('ROAD', `P${site.id} has reopened at the same spot (recurrence ×${site.recurrence}).`);
+    dashDirty = true; return;
+  }
+  potholes.push({id:nextPid++, x, lane, depth, active:true, status:'new', reports:0, recurrence:0, crewT:0, peakG:0, lastReport:null});
+  if (!silent) log('ROAD', `New pothole formed at ${Math.round(x)} m, ${laneName(lane)} lane (not yet detected).`);
+  dashDirty = true;
+}
+
+function laneClear(c, lane){
+  return !cars.some(o => o !== c && Math.abs(o.ly - lane) < 0.6 && Math.min((o.x - c.x + L) % L, (c.x - o.x + L) % L) < 14);
+}
+function knownAhead(c, lane, range){
+  return potholes.some(p => p.active && p.lane === lane && c.known.has(p.id) && ((p.x - c.x + L) % L) < range);
+}
+
+function report(c, p, g){
+  stats.reports++; p.reports++; p.lastReport = simTime; p.peakG = Math.max(p.peakG, g);
+  const cx = toPx(c.x), cy = laneY(c.ly);
+  effects.push({type:'link', x1:cx, y1:cy, x2:W - 34, y2:22, t:0, color:T.cloud});
+  if (p.status === 'new'){ p.status = 'reported'; log('SENSOR', `Car ${c.id} felt a ${g.toFixed(2)} g jolt. P${p.id} geotagged and sent to dashboard.`); }
+  else log('SENSOR', `Car ${c.id} confirmed P${p.id} (${g.toFixed(2)} g). Report #${p.reports}.`);
+  c.known.add(p.id);
+  if (alertsOn){
+    cars.forEach(o => {
+      if (o === c || o.known.has(p.id)) return;
+      const behind = (c.x - o.x + L) % L;
+      if (behind > 0 && behind < V2V_RANGE){
+        o.known.add(p.id); stats.alerts++;
+        const d = Math.round((p.x - o.x + L) % L);
+        o.hud = {t:simTime, text:`Alert from Car ${c.id}: pothole ${d} m ahead in the ${laneName(p.lane)} lane.`};
+        effects.push({type:'link', x1:cx, y1:cy, x2:toPx(o.x), y2:laneY(o.ly), t:0, color:T.signal});
+        log('V2V', `Car ${c.id} → Car ${o.id}: pothole P${p.id} ${d} m ahead.`);
+      }
+    });
+  }
+  if (p.status === 'reported' && p.reports >= 2){
+    p.status = 'verified';
+    let n = 0;
+    if (alertsOn) cars.forEach(o => { if (!o.known.has(p.id)){ o.known.add(p.id); n++; stats.alerts++;
+      o.hud = {t:simTime, text:`Cloud alert: verified pothole on Demo Road A at ${Math.round(p.x)} m, ${laneName(p.lane)} lane.`}; } });
+    log('CLOUD', `P${p.id} verified by 2 vehicles. Ticket raised for the road authority${n ? `; pushed to ${n} more car${n>1?'s':''}` : ''}.`);
+  }
+  dashDirty = true;
+}
+
+function crossing(c, p){
+  const sameLane = Math.abs(c.ly - p.lane) < 0.35, knew = c.known.has(p.id);
+  if (sameLane){
+    const g = 0.3 + p.depth * 0.07 * (c.speed / 12);
+    c.spikeQ.push(g, -g*0.55, g*0.25, -g*0.1);
+    if (c.speed > 7){
+      stats.hits++; c.hits++; c.bounce = 1;
+      effects.push({type:'ring', x:toPx(p.x), y:laneY(p.lane), t:0, color:T.alert});
+    } else if (knew) stats.avoided++;
+    if (g >= THRESH) report(c, p, g);
+    dashDirty = true;
+  } else if (knew){ stats.avoided++; dashDirty = true; }
+}
+
+function update(dt){
+  simTime += dt;
+  if (autoSpawn){
+    spawnTimer += dt;
+    if (spawnTimer > 20){
+      spawnTimer = 0;
+      const activeN = potholes.filter(p => p.active).length, fixed = potholes.filter(p => !p.active);
+      if (activeN < 6){
+        if (fixed.length && Math.random() < 0.55){ const f = fixed[Math.floor(Math.random()*fixed.length)]; addPothole(f.x, f.lane, 6 + Math.random()*6); }
+        else {
+          let x, tries = 0;
+          do { x = Math.random()*L; tries++; } while (tries < 20 && potholes.some(p => Math.abs(p.x - x) < 18));
+          addPothole(x, Math.random() < 0.5 ? 0 : 1, 5 + Math.random()*7);
+        }
+      }
+    }
+  }
+  potholes.forEach(p => {
+    if (p.status === 'dispatched'){
+      p.crewT -= dt;
+      if (p.crewT <= 0){
+        p.active = false; p.status = 'fixed'; cars.forEach(c => c.known.delete(p.id));
+        log('CREW', `Crew repaired P${p.id}. Alert withdrawn from all cars.`); dashDirty = true;
+      }
+    }
+  });
+  cars.forEach(c => {
+    c.prevX = c.x;
+    let target = c.base, ahead = null, min = Infinity;
+    cars.forEach(o => {
+      if (o === c || Math.abs(o.ly - c.ly) > 0.6) return;
+      const gap = (o.x - c.x + L) % L;
+      if (gap > 0 && gap < min){ min = gap; ahead = o; }
+    });
+    if (ahead && min < 16) target = Math.min(target, ahead.speed * Math.max(0, (min - 6) / 10));
+    if (alertsOn){
+      potholes.forEach(p => {
+        if (!p.active || !c.known.has(p.id) || p.lane !== c.lane) return;
+        const d = (p.x - c.x + L) % L;
+        if (d > 0 && d < 40){
+          const other = 1 - c.lane;
+          if (laneClear(c, other) && !knownAhead(c, other, 40)){
+            c.lane = other;
+            c.hud = {t:simTime, text:`Pothole ${Math.round(d)} m ahead. Steering into the ${laneName(other)} lane.`};
+          } else {
+            target = Math.min(target, 4);
+            if (!c.hud || simTime - c.hud.t > 2) c.hud = {t:simTime, text:`Pothole ${Math.round(d)} m ahead. Lane blocked, slowing to 15 km/h.`};
+          }
+        }
+      });
+    }
+    c.speed += (target - c.speed) * Math.min(1, dt * 2);
+    c.x = (c.x + c.speed * dt) % L;
+    const dl = c.lane - c.ly; c.ly += Math.max(-dt*1.4, Math.min(dt*1.4, dl));
+    const step = (c.x - c.prevX + L) % L;
+    potholes.forEach(p => { if (!p.active) return; const d = (p.x - c.prevX + L) % L; if (d > 0 && d <= step) crossing(c, p); });
+    c.bounce = Math.max(0, c.bounce - dt * 2.5);
+  });
+  effects.forEach(e => e.t += dt);
+  effects = effects.filter(e => e.t < (e.type === 'ring' ? 0.9 : 1.3));
+}
+
+function sampleSensors(){
+  cars.forEach(c => {
+    const z = (Math.random() - 0.5) * 0.08 + (c.spikeQ.length ? c.spikeQ.shift() : 0);
+    c.trace.push(z); c.trace.shift();
+  });
+}
+
+/* ---------- drawing ---------- */
+function resize(){
+  const wrapW = road.parentElement.clientWidth;
+  W = Math.max(760, wrapW); H = 250;
+  const dpr = window.devicePixelRatio || 1;
+  road.width = W * dpr; road.height = H * dpr; road.style.width = W + 'px'; road.style.height = H + 'px';
+  rctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const sw = sensor.clientWidth || 400;
+  sensor.width = sw * dpr; sensor.height = 130 * dpr; sctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+function roundRect(ctx, x, y, w, h, r){ ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
+
+function drawTower(ctx){
+  const x = W - 34;
+  ctx.strokeStyle = T.cloud; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(x-8, 52); ctx.lineTo(x, 18); ctx.lineTo(x+8, 52); ctx.moveTo(x-5, 40); ctx.lineTo(x+5, 40); ctx.stroke();
+  ctx.beginPath(); ctx.arc(x, 18, 9, -Math.PI*0.8, -Math.PI*0.2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(x, 18, 14, -Math.PI*0.8, -Math.PI*0.2); ctx.stroke();
+  ctx.fillStyle = T.ink; ctx.font = '500 10px "JetBrains Mono", monospace'; ctx.textAlign = 'right';
+  ctx.fillText('4G · CLOUD', x - 16, 30); ctx.textAlign = 'left';
+}
+
+function drawRoad(){
+  const ctx = rctx;
+  ctx.fillStyle = T.verge; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = T.asphalt; ctx.fillRect(0, ROAD_TOP, W, LANE_H*2);
+  ctx.fillStyle = T.marking; ctx.fillRect(0, ROAD_TOP + 2, W, 3); ctx.fillRect(0, ROAD_TOP + LANE_H*2 - 5, W, 3);
+  ctx.strokeStyle = 'rgba(255,255,255,.75)'; ctx.lineWidth = 2; ctx.setLineDash([18, 16]);
+  ctx.beginPath(); ctx.moveTo(0, ROAD_TOP + LANE_H); ctx.lineTo(W, ROAD_TOP + LANE_H); ctx.stroke(); ctx.setLineDash([]);
+  ctx.fillStyle = T.muted; ctx.font = '10px "JetBrains Mono", monospace';
+  for (let m = 0; m < L; m += 20){
+    const x = toPx(m); ctx.fillRect(x, ROAD_TOP + LANE_H*2 + 4, 1, 6); ctx.fillText(m + ' m', x + 3, ROAD_TOP + LANE_H*2 + 18);
+  }
+  ctx.fillStyle = T.ink; ctx.font = '600 11px Inter, sans-serif'; ctx.fillText('Traffic direction →', 12, ROAD_TOP + LANE_H*2 + 40);
+  drawTower(ctx);
+
+  potholes.forEach(p => {
+    const x = toPx(p.x), y = laneY(p.lane);
+    if (!p.active){
+      ctx.fillStyle = 'rgba(255,255,255,.14)'; roundRect(ctx, x - 16, y - 14, 32, 28, 4); ctx.fill();
+      ctx.strokeStyle = T.ok; ctx.lineWidth = 1.5; ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,255,.6)'; ctx.font = '500 9px "JetBrains Mono", monospace'; ctx.textAlign = 'center';
+      ctx.fillText('P' + p.id, x, y + 3); ctx.textAlign = 'left'; return;
+    }
+    const rx = 7 + p.depth * 0.8, ry = 8 + p.depth * 0.35;
+    ctx.fillStyle = '#16191d'; ctx.beginPath(); ctx.ellipse(x, y, rx, ry, 0.2, 0, Math.PI*2); ctx.fill();
+    ctx.strokeStyle = '#5c636b'; ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.strokeStyle = '#22262b'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x + rx, y); ctx.lineTo(x + rx + 6, y - 4); ctx.moveTo(x - rx, y + 2); ctx.lineTo(x - rx - 5, y + 6); ctx.stroke();
+    if (p.status !== 'new'){
+      const col = p.status === 'dispatched' ? T.cloud : T.alert;
+      ctx.strokeStyle = col; ctx.lineWidth = 2;
+      if (p.status === 'reported') ctx.setLineDash([4, 4]);
+      ctx.beginPath(); ctx.ellipse(x, y, rx + 6, ry + 6, 0, 0, Math.PI*2); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = col; ctx.font = '700 11px "JetBrains Mono", monospace';
+      ctx.fillText('P' + p.id, x + rx + 9, y - ry + 2);
+    }
+    if (p.status === 'dispatched'){
+      ctx.fillStyle = '#ff8a1f';
+      [[-rx-12, -8], [rx+12, -8], [-rx-12, 10], [rx+12, 10]].forEach(([dx, dy]) => {
+        ctx.beginPath(); ctx.moveTo(x+dx, y+dy-6); ctx.lineTo(x+dx-4, y+dy+4); ctx.lineTo(x+dx+4, y+dy+4); ctx.closePath(); ctx.fill();
+      });
+    }
+  });
+
+  cars.forEach(c => {
+    const baseX = toPx(c.x), y = laneY(c.ly) + Math.sin(simTime * 45) * c.bounce * 3;
+    [baseX, baseX - W, baseX + W].forEach(x => {
+      if (x < -40 || x > W + 40) return;
+      const w = 36, h = 20;
+      ctx.fillStyle = '#111'; [[-12,-11],[8,-11],[-12,9],[8,9]].forEach(([dx,dy]) => ctx.fillRect(x+dx, y+dy, 7, 3));
+      ctx.fillStyle = c.color; roundRect(ctx, x - w/2, y - h/2, w, h, 5); ctx.fill();
+      ctx.fillStyle = 'rgba(10,20,30,.55)'; roundRect(ctx, x + 4, y - h/2 + 3, 8, h - 6, 2); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.font = '700 11px Inter, sans-serif'; ctx.textAlign = 'center'; ctx.fillText(c.id, x - 6, y + 4); ctx.textAlign = 'left';
+      ctx.fillStyle = c.known.size && alertsOn ? T.signal : 'rgba(255,255,255,.5)';
+      ctx.beginPath(); ctx.arc(x - w/2 - 3, y, 2.5, 0, Math.PI*2); ctx.fill();
+      if (c.id === selectedId){ ctx.strokeStyle = T.marking; ctx.lineWidth = 2; roundRect(ctx, x - w/2 - 4, y - h/2 - 4, w + 8, h + 8, 7); ctx.stroke(); }
+      if (c.hud && simTime - c.hud.t < 2.5){
+        ctx.fillStyle = T.marking; ctx.beginPath(); ctx.moveTo(x, y - 24); ctx.lineTo(x - 7, y - 13); ctx.lineTo(x + 7, y - 13); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#16202a'; ctx.fillRect(x - 1, y - 21, 2, 4); ctx.fillRect(x - 1, y - 16, 2, 2);
+      }
+    });
+  });
+
+  effects.forEach(e => {
+    if (e.type === 'ring'){
+      const a = 1 - e.t / 0.9; ctx.strokeStyle = e.color; ctx.globalAlpha = a; ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.arc(e.x, e.y, 8 + e.t * 50, 0, Math.PI*2); ctx.stroke(); ctx.globalAlpha = 1;
+    } else {
+      const a = 1 - e.t / 1.3; ctx.strokeStyle = e.color; ctx.globalAlpha = a; ctx.lineWidth = 2; ctx.setLineDash([5, 4]);
+      ctx.lineDashOffset = -e.t * 40;
+      const mx = (e.x1 + e.x2) / 2, my = Math.min(e.y1, e.y2) - 30;
+      ctx.beginPath(); ctx.moveTo(e.x1, e.y1); ctx.quadraticCurveTo(mx, my, e.x2, e.y2); ctx.stroke();
+      ctx.setLineDash([]); ctx.globalAlpha = 1;
+    }
+  });
+}
+
+function drawSensor(){
+  const c = cars.find(c => c.id === selectedId); if (!c) return;
+  const w = sensor.clientWidth, h = 130, ctx = sctx, pad = 30;
+  ctx.clearRect(0, 0, w, h);
+  const yOf = v => h - 12 - ((v + 0.6) / 1.8) * (h - 24);
+  ctx.strokeStyle = T.line; ctx.lineWidth = 1; ctx.fillStyle = T.muted; ctx.font = '10px "JetBrains Mono", monospace';
+  [-0.5, 0, 0.5, 1.0].forEach(v => { const y = yOf(v); ctx.beginPath(); ctx.moveTo(pad, y); ctx.lineTo(w, y); ctx.stroke(); ctx.fillText(v.toFixed(1), 0, y + 3); });
+  ctx.strokeStyle = T.alert; ctx.setLineDash([4, 4]); const ty = yOf(THRESH);
+  ctx.beginPath(); ctx.moveTo(pad, ty); ctx.lineTo(w, ty); ctx.stroke(); ctx.setLineDash([]);
+  ctx.fillStyle = T.alert; ctx.textAlign = 'right'; ctx.fillText('detection threshold ' + THRESH + ' g', w - 4, ty - 4); ctx.textAlign = 'left';
+  ctx.strokeStyle = c.color; ctx.lineWidth = 1.6; ctx.beginPath();
+  c.trace.forEach((v, i) => { const x = pad + i / (c.trace.length - 1) * (w - pad); i ? ctx.lineTo(x, yOf(v)) : ctx.moveTo(x, yOf(v)); });
+  ctx.stroke();
+}
+
+/* ---------- DOM ---------- */
+function buildChips(){
+  const box = document.getElementById('carchips'); box.innerHTML = '';
+  cars.forEach(c => {
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'carchip';
+    b.setAttribute('aria-pressed', c.id === selectedId); b.innerHTML = `<b style="background:${c.color}"></b>Car ${c.id}`;
+    b.onclick = () => { selectedId = c.id; buildChips(); };
+    box.appendChild(b);
+  });
+}
+
+function updateHud(){
+  const c = cars.find(c => c.id === selectedId); if (!c) return;
+  document.getElementById('roSpeed').textContent = Math.round(c.speed * 3.6) + ' km/h';
+  document.getElementById('roLane').textContent = c.ly < 0.5 ? 'Left' : 'Right';
+  document.getElementById('roKnown').textContent = [...c.known].filter(id => potholes.find(p => p.id === id && p.active)).length;
+  document.getElementById('roHits').textContent = c.hits;
+  document.getElementById('phoneTtl').textContent = `PotholeNet · Car ${c.id}` + (c.hud ? ` · ${fmtT(c.hud.t)}` : '');
+  document.getElementById('phoneMsg').textContent = c.hud ? c.hud.text : 'No alerts yet. Road ahead clear.';
+}
+
+function renderFeed(){
+  document.getElementById('feed').innerHTML = feed.map(f => `<li><span class="t">${fmtT(f.t)}</span><span class="tag ${f.kind}">${f.kind}</span><span>${f.text}</span></li>`).join('');
+}
+
+const STATUS_LABEL = {new:'On road · undetected', reported:'Reported', verified:'Verified', dispatched:'Crew on site', fixed:'Fixed'};
+function priority(p){ const s = p.depth * Math.max(1, p.reports) * (1 + p.recurrence); return s > 30 ? 'High' : s > 14 ? 'Medium' : 'Low'; }
+
+function renderDash(){
+  const active = potholes.filter(p => p.active);
+  document.getElementById('kActive').textContent = active.length;
+  document.getElementById('kReports').textContent = stats.reports;
+  document.getElementById('kAlerts').textContent = stats.alerts;
+  document.getElementById('kHits').textContent = stats.hits;
+  document.getElementById('kAvoid').textContent = stats.avoided;
+  const order = {verified:0, reported:1, dispatched:2, new:3, fixed:4};
+  const rows = [...potholes].sort((a, b) => order[a.status] - order[b.status] || b.reports - a.reports);
+  document.getElementById('tbody').innerHTML = rows.map(p => {
+    const lat = (BASE_LAT + p.x * 0.000009).toFixed(5), lng = (BASE_LNG + p.lane * 0.00003).toFixed(5);
+    const canDispatch = p.status === 'reported' || p.status === 'verified';
+    const action = canDispatch ? `<button type="button" data-dispatch="${p.id}">Dispatch crew</button>`
+      : p.status === 'dispatched' ? `<span class="sub">ETA ${Math.max(0, Math.ceil(p.crewT))} s</span>` : `<span class="sub">—</span>`;
+    return `<tr><td class="num"><b>P${p.id}</b></td>
+      <td>${Math.round(p.x)} m · ${laneName(p.lane)} lane<span class="sub">${lat}, ${lng}</span></td>
+      <td class="num">${p.depth.toFixed(0)} cm${p.peakG ? `<span class="sub">peak ${p.peakG.toFixed(2)} g</span>` : ''}</td>
+      <td class="num">${p.reports}</td>
+      <td>${p.recurrence ? `<span class="rec">Recurring ×${p.recurrence}</span>` : '<span class="sub">First time</span>'}</td>
+      <td>${p.status === 'fixed' || p.status === 'new' ? '<span class="sub">—</span>' : `<span class="pri ${priority(p)}">${priority(p)}</span>`}</td>
+      <td><span class="pill ${p.status}">${STATUS_LABEL[p.status]}</span></td>
+      <td>${action}</td></tr>`;
+  }).join('');
+  const worst = potholes.filter(p => p.recurrence > 0).sort((a, b) => b.recurrence - a.recurrence)[0];
+  const ins = document.getElementById('insight');
+  if (worst) ins.innerHTML = `<b>Recurring hotspot:</b> P${worst.id} at ${Math.round(worst.x)} m has reopened ${worst.recurrence}× after repair. Patchwork isn't holding; schedule full resurfacing or check drainage at this spot.`;
+  else ins.innerHTML = alertsOn ? 'Turn off <b>Driver alerts</b> to compare: hits taken climb fast without the network.' : 'Driver alerts are <b>off</b>. Cars still report to the dashboard but can no longer warn each other.';
+}
+
+document.getElementById('tbody').addEventListener('click', e => {
+  const id = e.target.getAttribute && e.target.getAttribute('data-dispatch'); if (!id) return;
+  const p = potholes.find(p => p.id === +id);
+  if (p){ p.status = 'dispatched'; p.crewT = CREW_TIME; log('CREW', `Repair crew dispatched to P${p.id} (${Math.round(p.x)} m, ${laneName(p.lane)} lane).`); dashDirty = true; }
+});
+
+road.addEventListener('click', e => {
+  const r = road.getBoundingClientRect(), px = e.clientX - r.left, py = e.clientY - r.top;
+  const hit = cars.find(c => Math.abs(toPx(c.x) - px) < 22 && Math.abs(laneY(c.ly) - py) < 16);
+  if (hit){ selectedId = hit.id; buildChips(); return; }
+  if (py > ROAD_TOP && py < ROAD_TOP + LANE_H*2){
+    const lane = py < ROAD_TOP + LANE_H ? 0 : 1;
+    addPothole(px / W * L, lane, 6 + Math.random()*6);
+  }
+});
+
+document.getElementById('play').onclick = function(){ running = !running; this.textContent = running ? 'Pause' : 'Play'; };
+document.getElementById('speed').onchange = e => simSpeed = +e.target.value;
+document.getElementById('ncars').onchange = reset;
+document.getElementById('reset').onclick = reset;
+document.getElementById('alerts').onchange = e => { alertsOn = e.target.checked; log('ROAD', `Driver alerts switched ${alertsOn ? 'on' : 'off'}.`); dashDirty = true; };
+document.getElementById('auto').onchange = e => autoSpawn = e.target.checked;
+
+let last = performance.now();
+function loop(now){
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  if (frame % 30 === 0) readTheme();
+  if (running){
+    const steps = simSpeed; for (let i = 0; i < steps; i++) update(dt);
+    sampleSensors();
+  }
+  drawRoad(); drawSensor();
+  if (frame % 6 === 0){ updateHud(); if (feedDirty){ renderFeed(); feedDirty = false; } }
+  if (dashDirty && frame % 10 === 0){ renderDash(); dashDirty = false; }
+  else if (frame % 30 === 0 && potholes.some(p => p.status === 'dispatched')) renderDash();
+  frame++; requestAnimationFrame(loop);
+}
+readTheme(); resize(); reset(); renderDash();
+window.addEventListener('resize', resize);
+requestAnimationFrame(loop);
+})();
+</script>
+
+</body></html>
